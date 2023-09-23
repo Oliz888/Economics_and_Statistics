@@ -1,0 +1,291 @@
+---
+title: "Accelerated Statistics Final Project: Using DID to Evaluate the Impact of Intensive Case Management Services"
+author: "Shirui Zhou (sz614)"
+date: "`r Sys.Date()`"
+output: pdf_document
+header-includes:
+    - \usepackage{setspace}\doublespacing
+fontsize: 12pt
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r, include=FALSE}
+## Import packages
+library(readr)
+library(fBasics)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(datasets)
+library(haven)
+library(xtable)
+library(knitr)
+library(ggplot2)
+library(ivreg)
+library(statar)
+library(broom)
+library(data.table) ## For some minor data wrangling
+library(fixest)     ## NB: Requires version >=0.9.0
+library(tidyverse)
+library(plm)
+library(miceadds)
+library(lmtest)
+library(multiwayvcov)
+library(stargazer)
+library(gridExtra)
+```
+
+
+```{r, include=FALSE}
+# import the dataset
+setwd("~/Desktop")
+data <- read_csv("final_data_dd.csv")
+```
+
+### 1. Introduction
+
+Child support programs play a critical role in many American families' lives by ensuring that non-custodial parents (NCPs) provide necessary financial support to their children. However, barriers such as unemployment often hinder NCPs' ability to meet these obligations, leading to child support debt, a challenging issue with potential legal implications, including incarceration. Consequently, these circumstances can strain familial relationships and exacerbate financial distress for all involved parties, particularly the children at the center of these disputes.
+
+Recognizing these interconnected challenges, a state child support agency has innovatively introduced a program offering intensive case management services to NCPs. This initiative aims not only to facilitate job placement for these individuals, thereby enabling them to meet their child support obligations, but also to foster healthier relationships between NCPs, their children, and custodial parents. The program, implemented across selected local child support sites at different times, presents a unique opportunity for analysis. This study seeks to evaluate the causal impact of the intensive case management services program on employment rates among NCPs and single mothers and the incidence of child support debt among NCPs, contributing valuable insights to the ongoing policy discourse surrounding child support programs.
+
+
+### 2. Literature Review
+
+A substantial body of literature has examined the impact of similar interventions designed to aid non-custodial parents (NCPs) in meeting their child support obligations. These interventions, largely employment-focused, aim to address the critical barrier of unemployment or underemployment, which often underlies NCPs' inability to fulfill their child support commitments.
+
+Miller and Knox (2001) conducted one of the earliest and most comprehensive evaluations of these programs, focusing on the Parents’ Fair Share (PFS) demonstration. The PFS aimed to help unemployed NCPs secure employment, increase their earnings, and consequently, fulfill their child support obligations. However, the study found mixed results. While the program increased NCPs' employment rate in the short term, the effects were not sustained in the long term. Furthermore, the program did not significantly increase the total amount of child support paid by NCPs, indicating the need for additional supportive measures to achieve this outcome.
+
+More recently, Cancian, Meyer, and Han (2011) assessed the effects of the Child Support Noncustodial Parent Employment Demonstration (CSPED). The CSPED program provided a comprehensive range of services, including employment and training services, enhanced child support services, and parenting peer support. The study found that the CSPED had a positive, albeit modest, effect on NCPs' employment rates and child support compliance. Importantly, the CSPED also improved NCPs' sense of responsibility towards their children and their relationship with the custodial parents. These findings suggest that a holistic approach that addresses the multiple challenges faced by NCPs may yield better results in terms of both employment and child support outcomes.
+
+
+### 3. Research Questions
+
+In the context of the multifaceted issue of child support debt and employment challenges faced by non-custodial parents (NCPs) and single mothers, this study seeks to answer two primary research questions. First, we aim to understand the causal impact of the intensive case management services program on the employment rates of NCPs and single mothers. By investigating this question, we hope to discern the program's effectiveness in enhancing job opportunities and, consequently, the financial stability for these demographics. Second, we probe the program's influence on the propensity of NCPs to accrue child support debt. With this inquiry, we aim to elucidate whether the program's support can translate into more consistent child support payment compliance, thereby reducing the burden of debt for NCPs. The findings derived from these research questions will provide valuable insights into the effectiveness of this program and inform future policy-making.
+
+
+### 4. Data and Methodology
+
+#### 4.1 Description of the data
+
+```{r, include=FALSE}
+head(data)
+dim(data)
+summary(data)
+```
+
+The dataset utilized in this study is a rich panel dataset containing site-level observations from local child support offices. Comprised of 7440 observations, each entry corresponds to a unique site for a specific calendar quarter. The data spans numerous calendar years and quarters, thereby allowing for a comprehensive longitudinal analysis. The groups receiving the treatment are the local child support offices that ultimately utilize the ICM services. Conversely, the control groups consist of those child support offices that never integrated the program into their operations. According to the data, it shows that 129 (70%) of the sites are treated, and 53 sites are controlled (30%).
+
+```{r, include = FALSE}
+control_data = subset(data, treatment == 0)
+treatment_data = subset(data, treatment == 1)
+# Aggregate the data by 'site_id'
+control_group = aggregate(. ~ site_id, data = control_data, FUN = mean)
+treatment_group = aggregate(. ~ site_id, data = treatment_data, FUN = mean)
+# Print the control group data
+count(control_group)
+count(treatment_group)
+```
+
+The data contains several key variables. The variable 'site_id' uniquely identifies each local child support office site, while 'year_qtr' indicates the calendar quarter of observation. A binary 'treatment' variable signifies whether a site was selected for the intensive case management services program, with 'treatment_year_qtr' detailing the exact calendar quarter in which a treated site began the program. The variables 'ncp_emp_rate' and 'smom_emp_rate' provide the employment rates for NCPs and single mothers served by a site in a given calendar quarter, respectively. 'ncp_wdebt' represents the fraction of NCPs served by the site in the calendar quarter who owe child support debt. Lastly, 'Nncp' denotes the number of NCPs served by the site in the given calendar quarter. 
+
+This robust dataset, coupled with its temporal depth and breadth, is instrumental in facilitating a thorough evaluation of the program's impact. Preliminary analysis of the treatment's varying dates is conducted to ensure a clear understanding of the treatment timeline across the different sites. First, use the variable 'treatment_year_qtr', this paper confirms that dataset has varying dates of treatment from the beginning of the 2014 to the beginning of the 2016. 
+
+```{r, include = FALSE}
+
+treatment_group %>%
+  group_by(treatment_year_qtr) %>%
+  summarise(number = n())
+
+```
+
+
+#### 4.2. Intuition behind the DID design 
+
+The Difference-in-Differences (DiD) approach is particularly suited to this research context as it allows for causal inference in a quasi-experimental setting. The idea behind this research design is to compare the changes in outcomes over time between a group that was exposed to a treatment (in this case, the intensive case management services program) and a group that was not. In our context, the treated group would be the NCPs and single mothers in sites where the program was introduced, while the control group would be those in sites where the program was not introduced.
+
+The key intuition behind the DiD design is that while both groups may have followed different trends over time, the gap between these trends would have remained constant in the absence of the treatment. In other words, any changes in the employment rates of NCPs and single mothers, and the likelihood of NCPs owing child support debt, would have been the same in both the treatment and control groups if the program had not been introduced. Therefore, any divergence in these trends following the introduction of the program can be attributed to the program's effect.
+
+It's important to note that the DiD design relies on the crucial parallel trends assumption, which stipulates that in the absence of treatment, the average outcomes for the treated and control groups would have followed the same trend over time. While this assumption cannot be directly tested, it can be assessed by examining pre-treatment trends in the outcome variables for the treatment and control groups. If these trends appear parallel before the introduction of the treatment, it lends credibility to the assumption.
+
+In the context of our study, the DiD approach will allow us to estimate the causal impact of the intensive case management services program on the employment rate of NCPs and single mothers, as well as on the likelihood of NCPs owing child support debt, by comparing changes in these outcomes over time between the treatment and control groups.
+
+```{r}
+# Set up a 2x2 plot area
+par(mfrow=c(2,2))
+
+plotdata=aggregate(data$ncp_emp_rate, list(data$year_qtr,data$treatment), FUN=mean)
+# Plot 1
+plot(plotdata$Group.1[plotdata$Group.2==1],plotdata$x[plotdata$Group.2==1],type="l",col="red",xlab="Year",ylab="average ncp rate",main="Average employment rate of NCPs",ylim=c(0.2,0.6)) 
+lines(plotdata$Group.1[plotdata$Group.2==0],plotdata$x[plotdata$Group.2==0],type="b",col="blue")
+abline(v=2014, col="red", lwd=2, lty=2)
+abline(v=2016, col="red", lwd=2, lty=2)
+
+
+
+plotdata1=aggregate(data$smom_emp_rate, list(data$year_qtr,data$treatment), FUN=mean)
+# Plot 2
+plot(plotdata1$Group.1[plotdata1$Group.2==1],plotdata1$x[plotdata1$Group.2==1],type="l",col="red",xlab="Year",ylab="average smom rate",main="Average employment rate of s_mom",ylim=c(0.55,0.75)) 
+lines(plotdata1$Group.1[plotdata1$Group.2==0],plotdata1$x[plotdata1$Group.2==0],type="b",col="blue")
+abline(v=2014, col="red", lwd=2, lty=2)
+abline(v=2016, col="red", lwd=2, lty=2)
+
+plotdata2=aggregate(data$Nncp, list(data$year_qtr, data$treatment), FUN=mean)
+# Plot 3
+plot(plotdata2$Group.1[plotdata2$Group.2==1],plotdata2$x[plotdata2$Group.2==1],type="l",col="red",xlab="Year",ylab="Number of NCPs served",main="Served number of NCPs",ylim=c(40, 55)) 
+lines(plotdata2$Group.1[plotdata2$Group.2==0],plotdata2$x[plotdata2$Group.2==0],type="b",col="blue")
+abline(v=2014, col="red", lwd=2, lty=2)
+abline(v=2016, col="red", lwd=2, lty=2)
+
+plotdata3=aggregate(data$ncp_wdebt, list(data$year_qtr, data$treatment), FUN=mean)
+# Plot 4
+plot(plotdata3$Group.1[plotdata3$Group.2==1],plotdata3$x[plotdata3$Group.2==1],type="l",col="red",xlab="Year",ylab="fraction of NCPs owning debt",main="Fraction of NCPs with Debt",ylim=c(0, 0.5)) 
+lines(plotdata3$Group.1[plotdata3$Group.2==0],plotdata3$x[plotdata3$Group.2==0],type="b",col="blue")
+abline(v=2014, col="red", lwd=2, lty=2)
+abline(v=2016, col="red", lwd=2, lty=2)
+
+```
+
+These plots illustrates the changes in variables over time for both the treatment and control groups. The x-axis represents the calendar year, and the y-axis represents the average employment rate of NCPs, employment rate of single moms, fraction of NCPs owning debt and number of NCPs served by the program respectively. The color coding distinguishes between the treatment and control groups.
+
+The plot can be used to visually assess whether the treatment and control groups are similar in terms of their trends in all variables over time. The two lines (representing the treatment and control groups) are parallel before the treatment, which indicates that the treatment and control groups are similar in terms of their pre-treatment trends, which is an assumption of the Diff-in-Diff research design.
+
+The noticeable divergence in trends, specifically in terms of the proportion with child support debt and the NCP employment rate, began to appear only following the roll-out of the program at the beginning of the 2014. This suggests that the assumption of parallel trends is applicable in our scenario.
+
+
+
+```{r, echo=FALSE}
+par(mfrow=c(2,2))
+
+data$time_since_treatment = case_when(data$treatment == 1 ~ data$year_qtr - data$treatment_year_qtr, data$treatment_year_qtr == 0 ~ 0)
+
+# subset dataframe
+treatment_data = data[data$treatment==1,]
+
+# Create a data frame with the mean ncp employment rate by time since treatment
+mean_ncp_emp_rate <- aggregate(ncp_emp_rate ~ time_since_treatment, data = treatment_data, FUN = mean)
+
+theme_set(theme_bw(base_size = 8))
+# Create the first plot
+p1 <- ggplot(mean_ncp_emp_rate, aes(x = time_since_treatment, y = ncp_emp_rate)) +
+  geom_line() +
+  xlab("Time Since Treatment") +
+  ylab("Average NCP employment rate") +
+  ggtitle("Average employment rate by NCP")
+
+
+# Create a data frame with the mean employment rate of single mother by time since treatment
+mean_smom_emp_rate <- aggregate(smom_emp_rate ~ time_since_treatment, data = treatment_data, FUN = mean)
+
+# Create the second plot
+p2 <- ggplot(mean_smom_emp_rate, aes(x = time_since_treatment, y = smom_emp_rate)) +
+  geom_line() +
+  xlab("Time Since Treatment") +
+  ylab("Average single mother employment rate") +
+  ggtitle("Average employment rate by single mother")
+
+# Create a data frame with the mean fraction of NCPs owing debt by time since treatment
+mean_ncp_wdebt <- aggregate(ncp_wdebt ~ time_since_treatment, data = treatment_data, FUN = mean)
+
+# Create the third plot
+p3 <- ggplot(mean_ncp_wdebt, aes(x = time_since_treatment, y = ncp_wdebt)) +
+  geom_line() +
+  xlab("Time Since Treatment") +
+  ylab("Average fraction of NCPs") +
+  ggtitle("Average fraction of NCPs owe debt")
+
+# Create a data frame with the mean number of NCP by time since treatment
+mean_Nncp <- aggregate(Nncp ~ time_since_treatment, data = treatment_data, FUN = mean)
+
+
+# Create the fourth plot
+p4 <- ggplot(mean_Nncp, aes(x = time_since_treatment, y = Nncp)) +
+  geom_line() +
+  xlab("Time Since Treatment") +
+  ylab("Average number of NCPs") +
+  ggtitle("Average number of NCPs owe debt")
+
+# Combine all plots into one grid
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+```
+
+
+#### 4.3. Regression Specification and Result Analysis
+
+
+Now with the full data (treatment and control sites) and defined time since treatment, this paper would estimate the following regression specification. 
+
+$y_{i t}=\alpha_0+\alpha_1 T_i+\sum_{k \neq 0}\left[\delta_k T_i D_k\right]+\gamma_s+\gamma_t+\varepsilon_{i t}$
+
+wheere y denites the outcome variable of site s at year y and quarter q, D denotes the treatment status of each site, which varies across different periods, and $\gamma_S$ denotes sites fixed effects and $\gamma_t$denotes calendar year dummies. 
+
+D is assigned the value of 1 for any time periods following the implementation of the ICM program at site s, and 0 in all other cases. The terms $\gamma_S$, $\gamma_t$ represent the fixed effects (FEs) for the site, year and quarter respectively. 
+
+
+```{r, echo=FALSE, fig.width=6, fig.height=4}
+
+ddreg_ncp_emp = feols(ncp_emp_rate ~ i(time_since_treatment, treatment, ref = 0) | year_qtr + site_id, data = data)
+p1 = iplot(ddreg_ncp_emp, xlab = 'Time Since Program introduced', main = 'Employment Rate of NCPs')
+
+ddreg_smon = feols(smom_emp_rate ~ i(time_since_treatment, treatment, ref = 0) | year_qtr + site_id, data = data)
+p2 = iplot(ddreg_smon, xlab = 'Time Since Program introduced', main = 'Employment Rate of Single Mothers')
+
+ddreg_ncp_wdebt  = feols(ncp_wdebt ~ i(time_since_treatment, treatment, ref = 0) | year_qtr + site_id, data = data)
+p3 = iplot(ddreg_ncp_wdebt , xlab = 'Time Since Program Introduced', main = 'Fraction of NCPs with Child Support Debt')
+
+```
+
+To measure the average effects of the ICM program, this paper estimates the time since the ICM program begins. The above graph shows that the programs effect is significant since when we examine the employment rate of NCPs, it's not significant before the program and is positive after the program, and the fraction of NCPs with child support debt is not significant before the program but significantly negative at 0.1 level after the program. However for the employment rate of single mother, there's no clear effect. 
+
+##### 4.4. Average Effects of ICM Program on Key Outcomes
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+data$After = case_when(data$time_since_treatment > 0 ~ 1,data$time_since_treatment <= 0 ~ 0) 
+data$TAfter = data$treatment*data$After
+
+tafter_reg1 = feols(Nncp ~ TAfter + treatment | site_id + year_qtr,  data = data)
+
+tafter_reg2 = feols(ncp_emp_rate ~ TAfter + treatment | site_id + year_qtr,  data = data)
+tafter_reg3 = feols(smom_emp_rate ~ TAfter + treatment | site_id + year_qtr,  data = data)
+tafter_reg4 = feols(ncp_wdebt ~ TAfter + treatment | site_id + year_qtr,  data = data)
+
+etable_obj = etable(tafter_reg2, tafter_reg3, tafter_reg4)
+etable_df = as.data.frame(etable_obj)
+
+# Print the dataframe
+etable_df
+```
+
+This paper first estimates the impact of ICM programs on key metrics in above table, which  details the average effects. It's noted that the ICM program raises the chances of employment for NCPs by an average of 9.48 percentage points. At the same time, the proportion of NCPs burdened with child support debt is reduced by 7.34 percentage points on average due to the implementation of the program.
+
+The analysis also included a so-called placebo regression, which is a regression on the employment rate among single mothers. Since the ICM program was specifically designed and administered to the NCPs, who are predominantly single fathers, no significant impact on the employment rate of single mothers was expected. This is because the program does not directly affect this group. The results corroborated this prediction, indicating no significant statistical influence on the employment status of single mothers.
+
+
+### 5. Discussion
+
+In extending this discussion, it would be interesting to further examine the specific mechanisms through which the ICM program impacts the NCPs. Since the program has shown to significantly increase employment rates and decrease child support debt within this group, understanding the direct and indirect pathways through which these effects are achieved could provide insights into how to further optimize the program. It would also be useful to investigate the long-term impacts of these changes on the children and families involved. While the immediate impacts on employment and debt are significant, the ultimate goal is to improve the wellbeing of the children involved. Consequently, long-term studies examining the impacts on child wellbeing and family stability would be a valuable addition to this research.
+
+#### 5.1. Implications for policy and practice
+
+
+The findings from the study carry significant implications for policy-making and practical applications in the field of social services.  Given that the introduction of the ICM program led to a significant increase in the employment rate of non-custodial parents and a substantial decrease in their child support debt, the program appears to be effectively addressing key issues related to child support. Therefore, policy makers may consider expanding the implementation of the ICM program or similar initiatives in other regions or demographic groups.
+
+Furthermore, the findings indicate the importance of continuous monitoring and evaluation of such programs. The significant positive and negative impacts on different facets of the target group's lives underscore the need for comprehensive and nuanced understanding of program effects, to ensure that intended outcomes are being achieved and any unintended consequences are identified and addressed.
+
+
+### 6. Conclusion
+
+The investigation into the Impact of the ICM program has yielded compelling results, underscoring its robust efficacy in improving the socio-economic conditions of non-custodial parents (NCPs). The data indicates a significant uptick in employment rates among NCPs post-program implementation, demonstrating the program's effectiveness in facilitating economic stability among this demographic. Concurrently, the program has also been instrumental in reducing the prevalence of child support debt, further bolstering its utility. These findings lend credence to the program's strategic design, which appears to effectively address the challenges faced by NCPs. In light of these positive outcomes, it can be concluded that the ICM program serves as a powerful tool for promoting employment and mitigating child support debt among NCPs, thereby enhancing their financial resilience and overall well-being. This evidence invites further exploration into its potential scalability and adaptability to different contexts, with the aim of maximizing its reach and impact.
+
+
+### 7. References
+
+Cancian, M., Meyer, D. R., & Han, E. K. (2011). Child Support: Responsible Fatherhood and the Quid Pro Quo. The Annals of the American Academy of Political and Social Science, 635(1), 140–162.
+
+Miller, C., & Knox, V. (2001). The challenge of helping low-income fathers support their children: Final lessons from Parents’ Fair Share. New York: MDRC.
+    
+
+

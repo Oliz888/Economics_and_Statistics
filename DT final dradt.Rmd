@@ -1,0 +1,972 @@
+---
+title: "DT final draft"
+author: "Shirui Zhou"
+date: "4/20/2022"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE,echo=FALSE, message=FALSE, warnings=FALSE}
+
+
+install.packages("rmarkdown")
+install.packages("stargazer")
+install.packages("tidyverse")
+install.packages("lmtest")
+install.packages("dplyr")
+install.packages("sandwich")
+install.packages("tidyverse")
+install.packages("MatchIt")
+install.packages("optmatch")
+install.packages("boot")
+devtools::install_github('IQSS/Zelig', force = TRUE)
+install.packages("Zelig")
+install.packages("haven")
+install.packages("knitr")
+install.packages("cobalt")
+install.packages("WeightIt")
+install.packages("Matching")
+install.packages("rgenoud")
+install.packages("rbounds")
+install.packages("rvest")
+install.packages("readr")
+install.packages("mediation")
+install.packages("matrix")
+
+library(rmarkdown)
+library(dplyr)
+library(stargazer)
+library(sandwich)
+library(tidyverse)
+library(MatchIt)
+library(optmatch)
+library(lmtest)
+library(sandwich)
+library(boot)
+library(Zelig)
+library(haven)
+library(knitr)
+library(cobalt)
+library(WeightIt)
+library(Matching)
+library(rgenoud)
+library(rbounds)
+library(rvest)
+library(readr)
+library(mediation)
+```
+
+
+
+### Data Availability and Processing 
+```{r include=FALSE,echo=FALSE, message=FALSE, warnings=FALSE}
+##2018
+child_2018 <- read_dta("CFPS data 2010-2018/2018/ecfps2018childproxy_202012.dta")
+person_2018 <- read_dta("CFPS data 2010-2018/2018/ecfps2018person_202012.dta")
+famecon_2018 <- read_dta("CFPS data 2010-2018/2018/ecfps2018famecon_202101.dta")
+
+##2016
+person_2016 <- read_dta("CFPS data 2010-2018/2016/ecfps2016adult_201906.dta")
+child_2016 <- read_dta("CFPS data 2010-2018/2016/ecfps2016child_201906.dta")
+famecon_2016 <- read_dta("CFPS data 2010-2018/2016/ecfps2016famecon_201807.dta")
+```
+
+
+### construction of treatment and control group 
+```{r 16-18 newly added LBC, include=FALSE, warning=false}
+
+
+child_2018_1<-child_2018%>%
+  dplyr::select(pid, fid18, wb401, wb402, age)%>%
+  mutate(t_age = ifelse(age<16 & age>9, "1", "0"),
+         ma_ab=ifelse(wb402<6, "1", "0"),
+         pa_ab=ifelse(wb401<6, "1", "0"),
+         LBC_2018=ifelse(ma_ab==0 & pa_ab==0,"0", "1")
+         )
+child_2018_2<-child_2018_1 %>% filter(t_age == "1")
+
+
+child_2016_1<-child_2016%>%
+  dplyr::select(pid, fid16, wb401, wb402, cfps_age)%>%
+  mutate(t_age = ifelse(cfps_age<16 & cfps_age>9, "1", "0"),
+         ma_ab=ifelse(wb402<6, "1", "0"),
+         pa_ab=ifelse(wb401<6, "1", "0"),
+         LBC_2016=ifelse(ma_ab==0 & pa_ab==0, "0", "1")
+         )
+child_2016_2<-child_2016_1 %>% filter(t_age == "1")
+
+###2016-2018 newly added LBC 
+child_2018_3<-child_2018_2%>%
+  dplyr::select(LBC_2018, fid18, pid)
+
+child_2016_3<-child_2016_2%>%
+  dplyr::select(LBC_2016, fid16, pid)
+
+###child_1816<-left_join(child_2018_3, child_2016_3, by=c("fid18"="fid16"))
+child_1816<-left_join(child_2018_3, child_2016_3, by="pid")
+child_1816<-child_1816%>%
+  filter(LBC_2016==0)%>%
+  mutate(LBC_2018_N_2=ifelse(LBC_2018==1,"1", "0"))
+
+
+child_1816_1<-child_1816%>%
+  dplyr::select(pid, fid18, fid16, LBC_2018_N_2)
+
+table(child_1816_1$LBC_2018_N_2)
+
+```
+
+```{r  2018 data frame construction, echo=false, warning=false}
+
+person_2018_1<-person_2018%>%
+  dplyr::select(pid, pid_a_f, pid_a_m, gender, age, qc1, qp201, fml_count, cesd20sc, qm2016, qa301)
+
+colnames(person_2018_1)<-c("id","id_m","id_f","gender","age","schooling","health","fam_size","CESD20sc", "hap_lev", "regi_type")
+
+glimpse(person_2018_1)
+
+famecon_2018_1<-famecon_2018%>%
+  dplyr::select(fid18, countyid18, cid18, fo4, fincome2, fincome2_per,fincome2_per_p ,fp511, fa3)
+
+glimpse(famecon_2018_1)
+ 
+colnames(famecon_2018_1)<-c("fam_id","county_id","comm_id","remittance","net_inc","net_inc_pp","net_inc_pp_q","med_exp","water")
+
+child_person_2018<-left_join(child_1816_1, person_2018_1, by=c("pid"="id"))
+glimpse(child_person_2018)
+
+child_person_fam_2018<-left_join(child_person_2018, famecon_2018_1, by=c("fid18"="fam_id"))
+
+glimpse(child_person_fam_2018)
+
+parents_traits_2018<-person_2018%>%
+  dplyr::select(pid, cfps2018edu, age, qp201)
+
+child_person_fam_2018_1<-left_join(child_person_fam_2018, parents_traits_2018, by=c("id_m"="pid"))
+
+child_person_fam_2018_2<-left_join(child_person_fam_2018_1, parents_traits_2018, by=c("id_f"="pid"))
+
+child_person_fam_2018_2<-child_person_fam_2018_2%>%
+  dplyr::select(-c("fid16"))
+
+colnames(child_person_fam_2018_2)<-c("id", "fam_id", "LBC_2018", "id_m", "id_f", "gender","age", "schooling","health", "fam_size", "CESD20", "hap_lev","reg_type","county_id","comm_id","mig_remit_18", "fam_inc_18","fam_inc_pp_18","fam_inc_pp_q_18","med_exp","water","mo_edu","mo_age","mo_health","fa_edu","fa_age","fa_health")
+
+glimpse(child_person_fam_2018_2)
+df_2018<-child_person_fam_2018_2%>%
+  drop_na()
+```
+
+### construct the data framework
+```{r construct fr_18_16_whole, include=FALSE,echo=FALSE, message=FALSE, warnings=FALSE}
+person_2016_1<-child_2016%>%
+  dplyr::select(pid, pid_m, pid_f, cfps_gender, cfps_age, pc1_b_2, wl1, cesd20sc, qm2014, pa301)
+
+colnames(person_2016_1)<-c("id", "id_m", "id_f", "gender", "age", "schooling", "health", "CESD20","hap_lev","reg_type")
+
+child_person_2016<-left_join(child_1816_1, person_2016_1, by=c("pid"="id"))
+glimpse(child_person_2016)
+
+famecon_2016_1<-famecon_2016%>%
+  dplyr::select(fid16, countyid16, cid16, fo4, fincome2, fincome2_per, fincome2_per_p, fp511, fa3, fml2016_count)
+colnames(famecon_2016_1)<-c("fam_id","county_id", "community_id", "remittance", "net_inc","net_inc_pp","net_inc_pp_q", "med_exp", "water", "fam_size")
+glimpse(famecon_2016_1)
+
+child_person_fam_2016<-left_join(child_person_2016, famecon_2016_1, by=c("fid16"="fam_id"))
+glimpse(child_person_fam_2016)
+
+parents_traits_2016<-person_2016%>%
+  dplyr::select(pid, cfps2016edu, cfps_age, qp201)
+
+colnames(parents_traits_2016)<-c("id", "edu_degree", "age", "health")
+
+child_person_fam_2016_1<-left_join(child_person_fam_2016, parents_traits_2016, by=c("id_m"="id"))
+
+child_person_fam_2016_2<-left_join(child_person_fam_2016_1, parents_traits_2016, by=c("id_f"="id"))
+
+glimpse(child_person_fam_2016_2)
+
+child_person_fam_2016_2<-child_person_fam_2016_2%>%
+  dplyr::select(-c("fid16"))
+
+colnames(child_person_fam_2016_2)<-c("id","fam_id","LBC_2018","id_m","id_f","gender","age","schooling","health","CESD20","hap_lev","reg_type","country_id","comm_id","remmitance_16","fam_inc_16","fam_inc_pp_16","fam_inc_pp_q_16","med_exp","water","fam_size","mo_edu","mo_age","mo_health","fa_edu","fa_age","fa_health")
+
+
+df_2016<-drop_na(child_person_fam_2016_2)
+glimpse(df_2016)
+
+df_2016_1<-df_2016%>%
+  mutate(regi_agri=ifelse(reg_type==1, 1, 0),
+         tap_water=ifelse(water==3, 1, 0),
+         age_squared= age*age,
+         log_inc_pp_16=log(fam_inc_pp_16),
+         log_inc_pp_16_square=log_inc_pp_16*log_inc_pp_16
+         )
+
+glimpse(df_2016_1)
+
+df_2016_1_covariates<-df_2016_1%>%
+  dplyr::select(id, LBC_2018, gender, age, age_squared, schooling, health, fam_size, med_exp, tap_water, mo_edu, mo_age, mo_health, fa_age, fa_edu, fa_health, log_inc_pp_16, log_inc_pp_16_square, regi_agri)%>%
+  drop_na()
+
+
+### calculate the CESD score change from 2016 to 2018
+
+
+summary(df_2016$CESD20)
+summary(df_2018$CESD20)
+
+CESD_16<-df_2016%>%
+  dplyr::select(id, CESD20)
+
+colnames(CESD_16)<-c("id","CESD20_16")
+  
+CESD_18<-df_2018%>%
+  dplyr::select(id, CESD20)
+
+colnames(CESD_18)<-c("id","CESD20_18")
+
+
+CESD_18_16<-left_join(CESD_18, CESD_16, by="id")
+
+CESD_18_16_1<-CESD_18_16%>%
+  drop_na()%>%
+  mutate(CESD_18_16_cha=c(CESD20_18)-c(CESD20_16))%>%
+  transform(CESD_18_16_cha=as.numeric(CESD_18_16_cha))%>%
+  mutate(CESD_18_16_cha_rate=CESD_18_16_cha/CESD20_16)%>%
+  filter(CESD20_16>0 & CESD20_18>0)
+
+  
+summary(CESD_18_16_1)
+
+fr_18_16<-left_join(df_2016_1, CESD_18_16_1, by="id")
+
+fr_18_16<-fr_18_16%>%
+  drop_na()
+
+### sub classification for mechanism study 
+ 
+df_2018_2<-df_2018%>%
+  dplyr::select(id, fam_inc_18, fam_inc_pp_18, fam_inc_pp_q_18)%>%
+  filter(fam_inc_18>0)
+
+
+fr_18_16_whole<-left_join(fr_18_16, df_2018_2, by="id")
+
+glimpse(fr_18_16_whole)
+
+fr_18_16_whole<-fr_18_16_whole%>%
+  transform(LBC_2018=as.numeric(LBC_2018))%>%
+  mutate(inc_18_16=(fam_inc_18-fam_inc_16))%>%
+  mutate (inc_18_16_rate=inc_18_16/fam_inc_16)%>%
+  drop_na()
+
+
+
+glimpse(fr_18_16_whole)
+table(fr_18_16_whole$LBC_2018)
+
+```
+
+### PSM
+```{r simple logit regression of probality, echo=FALSE, warnings=FALSE}
+prob_LBC<-glm(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, family = binomial(link = "logit"), data=fr_18_16_whole)
+
+
+coeftest(prob_LBC, vcov. = vcovHC, type = "HC1")
+exp(prob_LBC$coefficients)
+
+
+```
+```{r Model-based Estimates, eval=FALSE}
+
+### Model-based Estimates 
+
+m.out0 <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "nearest",  data = fr_18_16_whole, capliper=0.01, replace=TRUE, ratio=3)
+
+m.out1 <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "optimal",  data = fr_18_16_whole, ratio=3)
+
+m.out2 <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "full",  data = fr_18_16_whole)
+
+m.out3 <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = fr_18_16_whole, pop.size= 200)
+
+
+##robust test: may be able to test different matching method: optimal, full, genetic 
+
+summary(m.out0)
+
+### Balance test 
+
+bal.tab(m.out0, stats = c("c", "m", "ks"), un = TRUE,  thresholds = c(m =0.1, v = 2))
+bal.tab(m.out1, stats = c("c", "m", "ks"), un = TRUE,  thresholds = c(m =0.1, v = 2))
+bal.tab(m.out2, stats = c("c", "m", "ks"), un = TRUE,  thresholds = c(m =0.1, v = 2))
+bal.tab(m.out3, stats = c("c", "m", "ks"), un = TRUE,  thresholds = c(m = 0.1, v = 2))
+
+
+love.plot(m.out0, binary = "std", thresholds = c(m = .1))
+
+
+## Model-based Estimates 
+
+z.out1 <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0), model = "ls")
+
+summary(z.out1)
+
+x.out0 <- setx(z.out1, LBC_2018=0)
+
+x1.out0 <- setx(z.out1, LBC_2018=1)
+
+s.out0 <- sim(z.out1, x = x.out0, x1 = x1.out0)
+
+summary(s.out0)
+
+### ATT
+
+
+z.out2 <- zelig(CESD_18_16_cha ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out3, "control"), model = "ls")
+
+x.out1 <- setx(z.out2, data = match.data(m.out3, "treat"), cond = TRUE) 
+s.out1 <- sim(z.out2, x = x.out1)
+
+summary(s.out1)
+
+
+### rate of change in instead of absolute value
+z.out2 <- zelig(CESD_18_16_cha_rate  ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out3, "control"), model = "ls")
+
+x.out1 <- setx(z.out2, data = match.data(m.out3, "treat"), cond = TRUE) 
+s.out1 <- sim(z.out2, x = x.out1)
+
+summary(s.out1)
+
+
+### estimation based on the genetic matching 
+
+z.out3 <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out3), model = "ls")
+
+summary(z.out3)
+
+x.out3 <- setx(z.out3, LBC_2018=0)
+
+x1.out3 <- setx(z.out3, LBC_2018=1)
+
+s.out3 <- sim(z.out3, x = x.out3, x1 = x1.out3)
+
+summary(s.out3)
+
+
+glimpse(fr_18_16_whole)
+mean(fr_18_16_whole$CESD_18_16_cha)
+```
+```{r Sensitivity Analysis, eval=FALSE}
+
+Y <- fr_18_16_whole$CESD_18_16_cha
+Tr <- fr_18_16_whole$LBC_2018
+
+
+attach(fr_18_16_whole)
+glimpse(fr_18_16_whole)
+
+X<-cbind(gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water)
+
+BalanceMat<-cbind(gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water)
+
+gen1<-GenMatch(Tr=Tr, X=X, BalanceMat=BalanceMat, pop.size = 100, data.type.integer = FALSE, print=0, replace= TRUE)
+
+mgen1<- Match(Y=Y, Tr=Tr, X=X, Weight.matrix = gen1, replace= FALSE)
+
+summary(mgen1)
+
+
+hlsens(mgen1, Gamma=1.5, GammaInc=.1, .1)
+
+
+
+
+
+
+```
+
+### Mechanism Study
+## subclassification 1: initial SES's impact on the mental health change 
+
+```{r create SES subclassification framework, include=FALSE, echo=FALSE, message=FALSE, warnings=FALSE}
+
+
+fr_18_16_whole_1<-fr_18_16_whole%>%
+  mutate(fam_inc_percent_rank = ntile(fam_inc_pp_16,100))%>%
+  mutate(high_inc_0.7=ifelse(fam_inc_percent_rank>70, "1","0"),
+         high_inc_0.6=ifelse(fam_inc_percent_rank>60, "1","0"),
+         high_inc_0.5=ifelse(fam_inc_percent_rank>50, "1","0"))
+  
+prob_LBC_2018_sub_70_high<-fr_18_16_whole_1%>%
+  filter(high_inc_0.7==1)
+
+prob_LBC_2018_sub_70_low<-fr_18_16_whole_1%>%
+  filter(high_inc_0.7==0)
+
+prob_LBC_2018_sub_60_high<-fr_18_16_whole_1%>%
+  filter(high_inc_0.6==1)
+
+prob_LBC_2018_sub_60_low<-fr_18_16_whole_1%>%
+  filter(high_inc_0.6==0)
+
+prob_LBC_2018_sub_50_high<-fr_18_16_whole_1%>%
+  filter(high_inc_0.5==1)
+
+prob_LBC_2018_sub_50_low<-fr_18_16_whole_1%>%
+  filter(high_inc_0.5==0)
+
+```
+
+```{r mechanism study: 70%/60%/50% SES subclassification,eval=FALSE}
+
+m.out0<- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = prob_LBC_2018_sub_70_high)
+
+summary(m.out0) 
+
+z.out1 <- zelig(CESD_18_16_cha ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0, "control"), model = "ls")
+
+summary(z.out1)
+
+x.out1 <- setx(z.out1, data = match.data(m.out0, "treat"), cond = TRUE) 
+summary(x.out1)
+
+s.out1 <- sim(z.out1, x = x.out1)
+summary(s.out1)
+
+summary(s.out1)
+
+
+
+
+### 70% high
+
+m.out0_70_high<- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = prob_LBC_2018_sub_70_low)
+
+summary(m.out0_70_high)
+
+z.out1_70_high <- zelig(CESD_18_16_cha ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_70_high, "control"), model = "ls")
+
+x.out1 <- setx(z.out2, data = match.data(m.out3, "treat"), cond = TRUE) 
+s.out1 <- sim(z.out2, x = x.out1)
+summary(s.out1)
+
+x.out0_70_high <- setx(z.out1_70_high, LBC_2018=0)
+
+x1.out0_70_high <- setx(z.out1_70_high, LBC_2018=1)
+
+s.out0_70_high <- sim(z.out1, x = x.out0_70_high, x1 = x1.out0_70_high)
+
+summary(s.out0_70_high)
+
+### 70% low 
+
+m.out0_70_low<- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = prob_LBC_2018_sub_60_low)
+
+summary(m.out0_70_low)
+
+z.out1_70_low <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_70_low), model = "ls")
+
+x.out0_70_low<- setx(z.out1_70_low, LBC_2018=0)
+
+x1.out0_70_low<- setx(z.out1_70_low, LBC_2018=1)
+
+s.out0_70_low<- sim(z.out1_70_low, x=x.out0_70_low, x1 = x1.out0_70_low)
+
+summary(s.out0_70_low)
+
+### 60% high
+m.out0_60_high <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = prob_LBC_2018_sub_60_high)
+
+summary(m.out0_60_high)
+
+z.out1_60_high <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri+ health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_60_high), model = "ls")
+
+x.out0_60_high <- setx(z.out1_60_high, LBC_2018=0)
+
+x1.out0_60_high <- setx(z.out1_60_high, LBC_2018=1)
+
+s.out0_60_high <- sim(z.out1, x = x.out0_60_high, x1 = x1.out0_60_high)
+
+summary(s.out0_60_high)
+
+### 60% low 
+
+m.out0_60_low <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = prob_LBC_2018_sub_60_low)
+
+summary(m.out0_60_low)
+
+z.out1_60_low <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_60_low), model = "ls")
+
+x.out0_60_low<- setx(z.out1_60_low, LBC_2018=0)
+
+x1.out0_60_low<- setx(z.out1_60_low, LBC_2018=1)
+
+s.out0_60_low<- sim(z.out1, x=x.out0_60_low, x1 = x1.out0_60_low)
+
+summary(s.out0_60_low)
+
+### 50% high 
+
+m.out0_50_high <- matchit(LBC_2018 ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = prob_LBC_2018_sub_50_high)
+
+summary(m.out0_50_high)
+
+z.out1_50_high <- zelig(CESD_18_16_cha ~ LBC_2018 + LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_60_low), model = "ls")
+
+x.out0_50_high<- setx(z.out1_50_high, LBC_2018=0)
+
+x1.out0_50_high<- setx(z.out1_50_high, LBC_2018=1)
+
+s.out0_50_high<- sim(z.out1, x=x.out0_50_high, x1 = x1.out0_50_high)
+
+summary(s.out0_50_high)
+
+
+### 50% low 
+
+m.out0_50_low <- matchit(LBC_2018 ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = prob_LBC_2018_sub_50_low)
+
+summary(m.out0_50_low)
+
+z.out1_50_low <- zelig(CESD_18_16_cha ~ LBC_2018 + LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_60_low), model = "ls")
+
+x.out0_50_low<- setx(z.out1_50_low, LBC_2018=0)
+
+x1.out0_50_low<- setx(z.out1_50_low, LBC_2018=1)
+
+s.out0_50_low<- sim(z.out1, x=x.out0_50_low, x1 = x1.out0_50_low)
+
+summary(s.out0_50_low)
+
+
+
+
+```
+
+## subclassification 2: remittance importance 
+
+```{r create SES subclassification framework, include=FALSE, echo=FALSE, message=FALSE, warnings=FALSE}
+
+glimpse(fr_18_16_whole)
+
+
+fr_18_16_whole_1<-fr_18_16_whole%>%
+  mutate(inc_percent_rank = ntile(inc_18_16_rate,100))%>%
+  mutate(high_inc_0.7=ifelse(inc_percent_rank>70, "1","0"),
+         high_inc_0.6=ifelse(inc_percent_rank>60, "1","0"),
+         high_inc_0.5=ifelse(inc_percent_rank>50, "1","0"))
+
+glimpse(fr_18_16_whole_1)  
+
+
+###subset by initial SES status
+inc_18_16_rate_sub_70_high<-fr_18_16_whole_1%>%
+  filter(high_inc_0.7==1)
+
+inc_18_16_rate_sub_70_low<-fr_18_16_whole_1%>%
+  filter(high_inc_0.7==0)
+
+inc_18_16_rate_sub_60_high<-fr_18_16_whole_1%>%
+  filter(high_inc_0.6==1)
+
+inc_18_16_rate_sub_60_low<-fr_18_16_whole_1%>%
+  filter(high_inc_0.6==0)
+
+inc_18_16_rate_sub_50_high<-fr_18_16_whole_1%>%
+  filter(high_inc_0.5==1)
+
+inc_18_16_rate_sub_50_low<-fr_18_16_whole_1%>%
+  filter(high_inc_0.5==0)
+
+```
+
+```{r subclassification remittance importance, eval=FALSE}
+
+m.out0<- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = inc_18_16_rate_sub_50_high)
+
+summary(m.out0) 
+
+z.out1 <- zelig(CESD_18_16_cha ~ gender + age + age_squared + regi_agri + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0, "control"), model = "ls")
+
+x.out1 <- setx(z.out1, data = match.data(m.out0, "treat"), cond = TRUE) 
+s.out1 <- sim(z.out1, x = x.out1)
+summary(s.out1)
+
+
+
+###70% high 
+
+summary(m.out0_70_high)
+
+m.out0_70_high <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = inc_18_16_rate_sub_70_high)
+
+z.out1_70_high <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_70_high), model = "ls")
+
+x.out0_70_high <- setx(z.out1_70_high, LBC_2018=0)
+
+x1.out0_70_high<- setx(z.out1_70_high, LBC_2018=1)
+
+s.out0_70_high <- sim(z.out1_70_high, x = x.out0_70_high, x1 = x1.out0_70_high)
+
+summary(s.out0_70_high)
+
+
+### 70% low
+m.out0_70_low <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = inc_18_16_rate_sub_70_low)
+
+z.out1_70_low <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_70_low), model = "ls")
+
+x.out0_70_low<- setx(z.out1_70_low, LBC_2018=0)
+
+x1.out0_70_low<- setx(z.out1_70_low, LBC_2018=1)
+
+s.out0_70_low<- sim(z.out1_70_low, x=x.out0_70_low, x1 = x1.out0_70_low)
+
+summary(s.out0_70_low)
+
+### 60% high 
+
+m.out0_60_high <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = inc_18_16_rate_sub_60_high)
+
+z.out1_60_high <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_60_high), model = "ls")
+
+summary(z.out1_60_high)
+
+x.out0_60_high <- setx(z.out1_60_high, LBC_2018=0)
+
+x1.out0_60_high<- setx(z.out1_60_high, LBC_2018=1)
+
+s.out0_60_high <- sim(z.out1_60_high, x = x.out0_60_high, x1 = x1.out0_60_high)
+
+summary(s.out0_60_high)
+
+
+### 60% low 
+
+m.out0_60_low <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = inc_18_16_rate_sub_60_low)
+
+
+z.out1_60_low <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_60_low), model = "ls")
+
+
+x.out0_60_low<- setx(z.out1_60_low, LBC_2018=0)
+
+x1.out0_60_low<- setx(z.out1_60_low, LBC_2018=1)
+
+s.out0_60_low<- sim(z.out1_60_low, x=x.out0_60_low, x1 = x1.out0_60_low)
+
+
+### 50% high
+
+m.out0_50_high <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = inc_18_16_rate_sub_50_high)
+
+
+z.out1_50_high <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_50_high), model = "ls")
+
+summary(z.out1_50_high)
+
+x.out0_50_high <- setx(z.out1_50_high, LBC_2018=0)
+
+x1.out0_50_high<- setx(z.out1_50_high, LBC_2018=1)
+
+s.out0_50_high <- sim(z.out1_50_high, x = x.out0_50_high, x1 = x1.out0_50_high)
+
+summary(s.out0_50_high)
+
+### 50% low
+
+m.out0_50_low <- matchit(LBC_2018 ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = inc_18_16_rate_sub_50_low)
+
+z.out1_50_low <- zelig(CESD_18_16_cha ~ LBC_2018 + gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0_50_low), model = "ls")
+
+
+x.out0_50_low<- setx(z.out1_50_low, LBC_2018=0)
+
+x1.out0_50_low<- setx(z.out1_50_low, LBC_2018=1)
+
+s.out0_50_low<- sim(z.out1_50_low, x=x.out0_50_low, x1 = x1.out0_50_low)
+
+summary(s.out0_50_low)
+
+```
+
+```{r bring structure, include=FALSE, echo=FALSE, message=FALSE, warnings=FALSE}
+
+
+child_1816_sub<-left_join(child_2018_2, child_2016_3, by=c("pid"))
+glimpse(child_1816_sub)
+
+child_1816_sub_1<-child_1816_sub%>%
+  filter(LBC_2016==0)%>%
+  mutate(bo_ab=ifelse(ma_ab=="1" & pa_ab=="1", 1, 0),
+         mo_ab=ifelse(ma_ab=="1" & pa_ab=="0", 1, 0),
+         fa_ab=ifelse(ma_ab=="0" & pa_ab=="1", 1, 0),
+         intact=ifelse(ma_ab=="0" & pa_ab=="0", 1, 0))%>%
+  dplyr::select(pid, mo_ab, fa_ab, bo_ab, intact)
+
+
+
+summary(child_1816_sub_1)
+
+glimpse(fr_18_16_whole)
+
+
+child_1816_sub_2<-left_join(fr_18_16_whole, child_1816_sub_1, by=c("id"="pid"))
+glimpse(child_1816_sub_2)
+
+fa_ab_fr<-child_1816_sub_2%>%
+  filter(bo_ab==1)
+
+both_ab_fr<-child_1816_sub_2%>%
+  filter(bo_ab==1)
+
+fa_ab_fr<-child_1816_sub_2%>%
+  filter(bo_ab==1)
+
+
+
+
+
+
+glimpse(fa_ab_fr)
+
+
+```
+
+```{r subclassification bring structure, eval=FALSE}
+
+### father absence 
+
+m.out0 <- matchit(bo_ab ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = child_1816_sub_2)
+
+summary(m.out0)
+
+z.out0 <- zelig(CESD_18_16_cha ~ gender + age + age_squared + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0, "control"), model = "ls")
+
+x.out0 <- setx(z.out0, data = match.data(m.out0, "treat"), cond = TRUE) 
+s.out0 <- sim(z.out0, x = x.out0)
+
+summary(s.out1)
+
+
+
+### only 35 matched pair out of 104 pair 
+z.out0 <- zelig(CESD_18_16_cha ~ fa_ab + gender + age + age_squared + regi_agri + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0),model = "ls")
+
+print(z.out0)
+summary(z.out0)
+
+x.out0 <- setx(z.out0, fa_ab=0)
+summary(x.out0)
+
+x1.out0 <- setx(z.out0, fa_ab=1)
+
+s.out0 <- sim(z.out0, x = x.out0, x1 = x1.out0)
+summary(s.out0)
+
+### mother absence
+
+m.out0 <- matchit(mo_ab ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data = child_1816_sub_2)
+
+summary(m.out0)
+
+### 11 out of 128 pair matched 
+
+z.out0 <- zelig(CESD_18_16_cha ~ mo_ab + gender + age + age_squared + regi_agri  + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0), model = "ls")
+
+print(z.out0)
+summary(z.out0)
+
+x.out0 <- setx(z.out0, mo_ab=0)
+
+x1.out0 <- setx(z.out0, mo_ab=1)
+
+s.out0 <- sim(z.out0, x = x.out0, x1 = x1.out0)
+summary(s.out0)
+
+
+### both absence: 46 out of 93 paired 
+
+m.out0 <- matchit(bo_ab ~ gender + age + age_squared + regi_agri + schooling + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, method = "genetic",  data =child_1816_sub_2)
+
+summary(m.out0)
+
+z.out0 <- zelig(CESD_18_16_cha ~ bo_ab + gender + age + age_squared + regi_agri + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = match.data(m.out0),model = "ls")
+
+print(z.out0)
+summary(z.out0)
+
+x.out0 <- setx(z.out0, bo_ab=0)
+
+x1.out0 <- setx(z.out0, bo_ab=1)
+
+s.out0 <- sim(z.out0, x = x.out0, x1 = x1.out0)
+summary(s.out0)
+
+
+```
+
+### mediation analysis
+```{r academic performance, eval=FALSE}
+
+glimpse(child_2018)
+
+score_2016<-child_2016%>%
+  dplyr::select(pid, wf501, wf502)
+
+colnames(score_2016)<-c("id", "chi_16", "math_16")
+
+score_2018<-child_2018%>%
+  dplyr::select(pid, wf501, wf502)
+
+colnames(score_2018)<-c("id","chi_18","math_18")
+
+score_18_16<-left_join(score_2018, score_2016, by="id")
+
+LBC_score_change<-left_join(child_1816_1, score_18_16, by=c("pid"="id"))
+
+glimpse(LBC_score_change)
+
+LBC_score_change_1<-LBC_score_change%>%
+  drop_na%>%
+  mutate(chi_cha=c(chi_18)-c(chi_16),
+         math_cha=c(math_18)-c(math_16),
+         totol_cha=c(chi_cha)+c(math_cha)
+  )
+
+LBC_score_change_2<-LBC_score_change_1%>%
+  drop_na%>%
+  mutate(chi_down=ifelse(chi_cha>0, 1, 0),
+         math_down=ifelse(math_cha>0, 1, 0),
+         both_down=ifelse(chi_cha>0 & math_cha>0, 1, 0),
+         one_down=ifelse(chi_cha>0 | math_cha>0, 1, 0)
+  )
+
+
+glimpse(LBC_score_change_2)
+summary(LBC_score_change_2)
+
+
+### with the excellent, good, average and poor being 1,2,3,4 respectively, the postie change will indicate a deterioration in academic performance. 
+  
+```
+
+
+```{r mediator variable construction, eval=FALSE}
+
+glimpse(child_2018)
+
+med_qint<-person_2018%>%
+  dplyr::select(pid, qint001,qint003,qint005,qint007,qint009,qint010,qint011,qint014)
+
+colnames(med_qint)<-c("id","angry","afraid","lonely","upset","worried_well","worried_fini","worried_fri","ashamed")
+
+glimpse(med_qint)
+
+
+med_qint_1<-left_join(fr_18_16_whole, med_qint, by=c("id"))
+
+med_qint_1<-med_qint_1%>%
+  drop_na()%>%
+  filter(ashamed>0)
+
+glimpse(med_qint_1)
+
+
+med_qint_2 <-med_qint_1%>%
+    mutate(med_qint_tot = dplyr::select(., angry:ashamed) %>% 
+             rowSums(na.rm = TRUE))
+  
+glimpse(med_qint_2)
+
+
+med_qext<-person_2018%>%
+  dplyr::select(pid, qext002, qext004, qext006, qext008, qext012, qext013)
+
+colnames(med_qext)<-c("id","quarrel","focus","distract","finish","gossiping","fighting")
+
+glimpse(med_qext)
+
+med_qext_1<-left_join(med_qint_2, med_qext, by=c("id"))
+
+med_qext_1<-med_qext_1%>%
+  drop_na()%>%
+  filter(fighting>0)
+
+glimpse(med_qext_1)
+
+fr_med <-med_qext_1%>%
+    mutate(med_qext_tot = dplyr::select(., quarrel:fighting) %>% 
+             rowSums(na.rm = TRUE))
+
+
+```
+
+```{r mediation analysis, eval=FALSE}
+
+fr_med_1<-left_join(fr_med, LBC_score_change_2, by=c("id"="pid"))
+
+glimpse(fr_med_1)
+
+Xnames<-c("gender","age","health","fam_size","log_inc_pp_16","med_exp","fa_health","fa_edu","fa_age","mo_health","mo_age","mo_edu", "tap_water")
+
+
+m.med <- multimed(outcome = "totol_cha", med.main = "med_qint_tot", med.alt = "med_qext_tot",
+treat = "LBC_2018", covariates = Xnames, data = fr_med_1, sims = 100) 
+
+summary(m.med)
+
+plot(m.med, type = "point")
+
+plot(m.med, type = c("sigma", "R2-total"), tgroup = c("treated", "control"))
+
+glimpse(fr_med_1)
+
+
+med.fit<- lm(med_qint_tot ~ LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size + inc_18_16_rate + fa_health + mo_health + mo_edu + fa_age + tap_water, data = fr_med_1)
+
+out.fit <- lm(totol_cha ~ med_qint_tot + LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size +log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water,
+data =  fr_med_1)
+
+med.out <- mediate(med.fit, out.fit, treat = "LBC_2018", mediator = "med_qint_tot", robustSE = TRUE, sims = 100)
+
+summary(med.out)
+
+table(fr_med_1$totol_cha)
+
+med.fit_1<- lm(med_qext_tot ~ LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = fr_med_1)
+
+out.fit_1 <- lm(totol_cha~ med_qext_tot + LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size +log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water,data =fr_med_1)
+
+med.out_1 <- mediate(med.fit_1, out.fit_1, treat = "LBC_2018", mediator = "med_qext_tot", robustSE = TRUE, sims = 100)
+
+summary(med.out_1)
+
+med.fit_2<- lm(med_qext_tot ~ LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = fr_med_1)
+
+out.fit_2 <- glm(both_down ~ med_qext_tot + LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size +log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water,data = fr_med_1, family = binomial("probit"))
+
+med.out_2 <- mediate(med.fit_2, out.fit_2, treat = "LBC_2018", mediator = "med_qext_tot", robustSE = TRUE, sims = 100)
+
+summary(med.out_2)
+
+
+med.fit_3<- lm(med_qint_tot ~ LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size + log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = fr_med_1)
+
+out.fit_3 <- glm(both_down ~ med_qint_tot + LBC_2018 + gender + age + age_squared + regi_agri + health + fam_size +log_inc_pp_16 + log_inc_pp_16_square + med_exp + fa_health + fa_edu + mo_health + mo_edu + mo_age + fa_age + tap_water, data = fr_med_1, family = binomial("probit"))
+
+med.out_3 <- mediate(med.fit_3, out.fit_3, treat = "LBC_2018", mediator = "med_qint_tot", robustSE = TRUE, sims = 100)
+
+summary(med.out_3)
+
+
+
+
+
+
+
+```
+
+
+
